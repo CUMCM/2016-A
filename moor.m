@@ -61,7 +61,7 @@ while fmax-fmin>1e-10
     theta(1) = 0;   
     
     for i = 1:N-1
-        fx = Ft(i)*sin(theta(i)) - Fw(i) - Fs(i);
+        fx = Ft(i)*sin(theta(i)) + Fw(i) + Fs(i);
         
         fz = Fb(i) + Ft(i)*cos(theta(i));
         % add load from heavy ball = weight - buoyancy
@@ -73,7 +73,7 @@ while fmax-fmin>1e-10
         if theta(i+1)>=pi/2; theta(i+1) = pi/2; end
     end
     
-    phi =atan2( Ft.*sin(theta), (Ft.*cos(theta)-1/2*Fb));
+    phi =atan2( Ft.*sin(theta)+Fs(i)/2, Ft.*cos(theta)-Fb/2 );
     phi(theta==pi/2)=pi/2; phi(1)=0;     % the tilt of each element
     
     x = h.*sin(phi); z = h.*cos(phi);    % projected length
