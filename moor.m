@@ -18,7 +18,6 @@ function [tilt,elev,xsbed,xbuoy,f] = moor(Lc,chain,vw,vs,M,depth,isplot)
 % Zhou Lvwen: zhou.lv.wen@gmail.com
 % September 12, 2016
 
-
 if nargin==0;Lc=22.05;chain=2;vw=12;vs=0;M=1200;depth=18;isplot=1; end
 if nargin==6;isplot=0; end
 
@@ -26,75 +25,86 @@ g = 9.81;                 % acceleration of gravity [m/s^2]
 rho = 1.025e3;            % density of seawater [kg/m^3]
 rhoFe = 7.9e3;            % density of ferrum [kg/m^3]
 cdwin = 0.625;            % drag coefficient in wind
-cdsea = 374;              % drag coefficient in sea water 
 
 [lc, mc, dc] = chainpara(chain);
 nc = round(Lc/lc);        % number of chain units
 
 %   [buoy, 4 steel tubes, cylindrical drum, a series of welded chain]
 h = [   2,      ones(1,4),   1, lc*ones(1,nc)];  % m
-m = [1000,   10*ones(1,4), 100, mc*ones(1,nc)];  % kg
 d = [   2, 5e-2*ones(1,4), 0.3, dc*ones(1,nc)];  % m
+m = [1000,   10*ones(1,4), 100, mc*ones(1,nc)];  % kg
 
-N = length(h);
-[Ft, Fw, theta, phi] = deal(zeros(1,N));
+phi = zeros(1,length(h));
 
 Fb = pi*(d/2).^2.*h*rho*g - m*g;         % Turn masses/buoyancies into forces
-vsi = @(zi)(vs./sqrt(18)*sqrt(zi));      % water volecity proflile
-
-zi = fliplr(cumsum(fliplr(h.*cos(phi)))); zi = zi/max(zi)*depth;
 
 fmin = 0; fmax = 1;
 while fmax-fmin>1e-10
     
     f = (fmax+fmin)/2;                   % determined by f dichotomy 
     
-    Fb(1) = pi*(d(1)/2).^2.*h(1)*rho*g*f-m(1)*g;
+    Fb(1) = f*pi*(d(1)/2).^2.*h(1) * rho * g - m(1)*g;
     
-    S = h.*d;                            % exposed area of cylinder/wire
-    Fw(1) = cdwin*(1-f)*S(1)*vw.^2;      % wind load
+    Fw = cdwin * (1-f)*h(1).*d(1) * vw.^2;  % wind load
     
-    zi(1) = depth-f*h(1)/2;
-    Fs = cdsea.*S.*cos(phi).*vsi(zi).^2; % water load
+    Fs = waterload(vs, h, d, phi, depth, f);% water load
     
-    Ft(1) = 0;
-    theta(1) = 0;   
-    
-    for i = 1:N-1
-        fx = Ft(i)*sin(theta(i)) + Fw(i) + Fs(i);
+    % solve equilibrium equations to determine tilt angle
+    phi = solvequileq(Fb, Fw, Fs, M, f);
         
-        fz = Fb(i) + Ft(i)*cos(theta(i));
-        % add load from heavy ball = weight - buoyancy
-        if i==6; fz = fz - (M-M/7.9)*g; end
-        
-        Ft(i+1) = sqrt(fx^2+fz^2);
-        
-        theta(i+1) = acos(fz/Ft(i+1));   % the tilt of Ft
-        if theta(i+1)>=pi/2; theta(i+1) = pi/2; end
-    end
-    
-    phi =atan2( Ft.*sin(theta)+Fs(i)/2, Ft.*cos(theta)-Fb/2 );
-    phi(theta==pi/2)=pi/2; phi(1)=0;     % the tilt of each element
-    
     x = h.*sin(phi); z = h.*cos(phi);    % projected length
     
-    zi = fliplr(cumsum(fliplr(z))) - h.*cos(phi)/2; 
-    zw = sum(z)-h(1)*(1-f);              % waterline
+    zw = sum(z(2:end)) + h(1)*f;         % waterline
     
-    if zw>depth; fmax = f; else; fmin=f; end
-    
+    if zw>depth; fmax = f; else; fmin = f; end
 end
 
 % integrate from the bottom to the top
-x = cumsum([0 fliplr(x)]);
-z = cumsum([0 fliplr(z)]);
+x = cumsum([0 fliplr(x)]);  z = cumsum([0 fliplr(z)]);
 
 tilt = phi(6)*180/pi;                    % tilt angle of the drum
 elev = 90- phi(end)*180/pi;              % elevation angle of chain at anchor
 xsbed = max(x(z<1e-10));                 % length of the chain on the seabed
-xbuoy = max(x);                          % swimming range of the buoy
+xbuoy = x(end-1);                        % swimming range of the buoy
 
-if isplot; plotmoor(x,z,Lc,chain,vw,M,depth,tilt,elev); end
+if isplot;plotmoor(x,z,h,phi,Lc,chain,vw,vs,M,depth,tilt,elev,xbuoy,f);end
+
+% ------------------------------------------------------------------------
+
+function Fs = waterload(vs, h, d, phi, depth, f)
+cd = 374;                 % drag coefficient in sea water 
+z = h.*cos(phi);
+zi = fliplr(cumsum(fliplr(z))) - h.*cos(phi)/2; 
+zi(1) = depth - f*h(1)/2;
+vsi = vs./sqrt(depth)*sqrt(zi);          % water volecity proflile
+Fs = cd * h.*d.*cos(phi) .* vsi.^2;      % water load
+Fs(1) = Fs(1)*f; 
+
+% ------------------------------------------------------------------------
+
+function phi = solvequileq(Fb, Fw, Fs, M, f)
+g = 9.81;                 % acceleration of gravity [m/s^2]
+N = length(Fb);
+[theta, phi, Ft] = deal(zeros(1,N));
+for i = 1:N-1
+    fx = Ft(i)*sin(theta(i)) + Fs(i);
+    if i==1; fx = fx + Fw; end
+    
+    fz = Fb(i) + Ft(i)*cos(theta(i));
+    % add load from heavy ball = weight - buoyancy
+    if i==6; fz = fz - (M-M/7.9)*g; end
+    
+    Ft(i+1) = sqrt(fx^2+fz^2);
+    
+    theta(i+1) = acos(fz/Ft(i+1));   % the tilt of Ft
+    
+    if theta(i+1)>pi/2; theta(i+1) = pi/2; end
+end
+
+phi =atan2( Ft.*sin(theta)+Fs/2, Ft.*cos(theta)+Fb/2);
+phi(phi>pi/2) = pi/2;                % the tilt of each element
+phi(1) = atan2( Fs(1)*f/2+Fw(1)*(f+(1-f)/2), Fb(1)*f/2 );
+
 % ------------------------------------------------------------------------
 
 function [lc, mc, dc] = chainpara(typeid)
@@ -113,24 +123,51 @@ dc = 2*sqrt(rho(typeid)/rhoFe/pi);   % diameter of the welded chain
 % -------------------------------------------------------------------------
 
 
-function plotmoor(x,z,Lc,chain,v,M,depth,tilt,elev)
-figure('name',sprintf('Lc=%4.2f m, chain=%d, v=%3.1f m/s, M=%4.1f kg',...,
-                       Lc,         chain,    v,           M));
-x1 = x(end)-1; x2 = x1+2; x3 = x(end-1)+1; x4 = x3-2;
-z1 = z(end);   z2 = z1;   z3 = z(end-1);   z4 = z3;
-fill([x1 x2 x3 x4], [z1 z2 z3 z4], 'r')
-hold on
-plot(x(end-6:end-1),z(end-6:end-1),'o-','linewidth',2, 'markersize',3);
-plot(x(1:end-6),z(1:end-6),'-m','linewidth',1)
+function plotmoor(x,z,h,phi,Lc,chain,vw,vs,M,depth,tilt,elev,xbuoy,f)
+figure; N = length(x);
+% draw buoy
+x1 = x(N)  -cos(phi(1));   x2 = x(N)  +cos(phi(1)); 
+x3 = x(N-1)+cos(phi(1));   x4 = x(N-1)-cos(phi(1));
+z1 = z(N)  +sin(phi(1));   z2 = z(N)  -sin(phi(1));   
+z3 = z(N-1)-sin(phi(1));   z4 = z(N-1)+sin(phi(1));
+fill([x1 x2 x3 x4], [z1 z2 z3 z4], 'r');hold on
+text(x(N-1)+1.3, z(N-1), sprintf('%2.1f m',f*h(1)));
 
-plot([x(end-6) x(end-6)],[z(end-6) z(end-6)-2],'-r','linewidth',1);
-plot(x(end-6),z(end-6)-2,'.r','linewidth',1,'markersize',50)
+% draw steel tubes
+plot(x(N-5:N-1),z(N-5:N-1),'o-','linewidth',1, 'markersize',2);
 
-plot([0,depth+2],[depth,depth],'--')
-text(1,2,sprintf('%3.1f degree',elev));
-text(x(end-6)-5,z(end-6)+0.5,sprintf('%3.1f degree',tilt));
-box on; axis image; grid on
-set(gca,'xtick',[max(x(z<1e-10)),round(x(end)*10)/10])
-axis([0,depth+2,0,depth+2]); xlabel('x'); ylabel('z')
-title(sprintf('Lc=%4.2f m, chain=%d, v=%3.1f m/s, M=%4.1f kg',...,
-                       Lc,         chain,    v,           M));
+% draw the drum
+x1 = x(N-5)-0.15*cos(phi(6));   x2 = x(N-5)+0.15*cos(phi(6)); 
+x3 = x(N-6)+0.15*cos(phi(6));   x4 = x(N-6)-0.15*cos(phi(6));
+z1 = z(N-5)+0.15*sin(phi(6));   z2 = z(N-5)-0.15*sin(phi(6));   
+z3 = z(N-6)-0.15*sin(phi(6));   z4 = z(N-6)+0.15*sin(phi(6));
+fill([x1 x2 x3 x4], [z1 z2 z3 z4], 'r');hold on
+text(x(N-6)-2,z(N-6)+0.5,sprintf('%3.1f^\\circ',tilt));
+
+% draw the welded chain
+plot(x(1:N-6),z(1:N-6),'-m')
+text(0.5,1.5,sprintf('%3.1f^\\circ',elev));
+types = {'I','II','III','IV','V'};
+text(x(ceil(N/2))+1, z(ceil(N/2)), sprintf('%s:%5.1f m',types{chain}, Lc));
+
+% draw the heavy ball 
+plot([x(N-6) x(N-6)],[z(N-6) z(N-6)-4],'-r');
+plot(x(N-6),z(N-6)-4,'.r','markersize',50)
+text(x(N-6)-1,z(N-6)-5,sprintf('%d kg',M));
+
+axismax = max(depth+2,xbuoy+4);
+% draw waterline
+plot([0,axismax],[depth,depth],'--');
+
+% wind velocity
+quiver(x(N)-8,depth+1,2,0,'MaxHeadSize',0.5,'color','r');
+text(x(N)-5.5,depth+1,sprintf('%3.1f m/s', vw),'color','r');
+
+% water velocity
+quiver(x(N)-8,depth-1,2,0,'MaxHeadSize',0.5,'color','b');
+text(x(N)-5.5,depth-1,sprintf('%3.1f m/s', vs),'color','b');
+
+box on; axis image; 
+set(gca,'xtick',[max(x(z<1e-10)),round(xbuoy*10)/10],'xgrid','on')
+axis([0,axismax,0,axismax]); 
+xlabel('x'); ylabel('z')
