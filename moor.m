@@ -84,6 +84,8 @@ Fs(1) = Fs(1)*f;
 
 function phi = solvequileq(Fb, Fw, Fs, M, f)
 g = 9.81;                 % acceleration of gravity [m/s^2]
+rho = 1.025e3;            % density of seawater [kg/m^3]
+rhoFe = 7.9e3;            % density of ferrum [kg/m^3]
 N = length(Fb);
 [theta, phi, Ft] = deal(zeros(1,N));
 for i = 1:N-1
@@ -92,7 +94,7 @@ for i = 1:N-1
     
     fz = Fb(i) + Ft(i)*cos(theta(i));
     % add load from heavy ball = weight - buoyancy
-    if i==6; fz = fz - (M-M/7.9)*g; end
+    if i==6; fz = fz - M*g + rho*(M/rhoFe)*g; end
     
     Ft(i+1) = sqrt(fx^2+fz^2);
     
